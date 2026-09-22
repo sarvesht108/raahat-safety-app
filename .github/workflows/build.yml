@@ -16,6 +16,17 @@ jobs:
           channel: 'stable'
       - name: Create platform folders
         run: flutter create --platforms=android --project-name raahat_safety .
+      - name: Add permissions to AndroidManifest
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          sed -i '/<manifest/a\
+          <uses-permission android:name="android.permission.SEND_SMS"/>\
+          <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\
+          <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\
+          <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\
+          <uses-permission android:name="android.permission.WAKE_LOCK"/>\
+          <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\
+          <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>' $MANIFEST
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
