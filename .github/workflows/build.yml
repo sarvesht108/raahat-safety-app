@@ -36,7 +36,7 @@ jobs:
         run: |
           FILE=android/app/build.gradle.kts
           sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' $FILE
-          sed -i '/^dependencies {/a\    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' $FILE
+          printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n' >> $FILE
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
