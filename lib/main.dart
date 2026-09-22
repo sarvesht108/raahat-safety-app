@@ -113,7 +113,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  int selectedMinutes = 15;
+  int selectedMinutes = 5;
   int warningMinutesBefore = 2;
   bool timerActive = false;
   DateTime? endTime;
@@ -204,42 +204,54 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .showSnackBar(const SnackBar(content: Text('Pehle Contacts add karo')));
       return;
     }
-    final prefs = await SharedPreferences.getInstance();
-    final now = DateTime.now();
-    final end = now.add(Duration(minutes: selectedMinutes));
-    final warnAt = end.subtract(Duration(minutes: warningMinutesBefore));
-
-    await prefs.setString('timerEndTime', end.toIso8601String());
-    await prefs.setBool('alertSent', false);
-
     try {
-      final pos =
-          await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
-      await prefs.setString('lastLat', pos.latitude.toString());
-      await prefs.setString('lastLng', pos.longitude.toString());
-    } catch (_) {}
+      final prefs = await SharedPreferences.getInstance();
+      final now = DateTime.now();
+      final end = now.add(Duration(minutes: selectedMinutes));
+      final warnAt = end.subtract(Duration(minutes: warningMinutesBefore));
 
-    await AndroidAlarmManager.oneShotAt(
-      warnAt,
-      warningAlarmId,
-      warningAlarmCallback,
-      exact: true,
-      wakeup: true,
-      rescheduleOnReboot: true,
-    );
-    await AndroidAlarmManager.oneShotAt(
-      end,
-      finalAlarmId,
-      finalAlarmCallback,
-      exact: true,
-      wakeup: true,
-      rescheduleOnReboot: true,
-    );
+      await prefs.setString('timerEndTime', end.toIso8601String());
+      await prefs.setBool('alertSent', false);
 
-    setState(() {
-      timerActive = true;
-      endTime = end;
-    });
+      try {
+        final pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high);
+        await prefs.setString('lastLat', pos.latitude.toString());
+        await prefs.setString('lastLng', pos.longitude.toString());
+      } catch (_) {}
+
+      final ok1 = await AndroidAlarmManager.oneShotAt(
+        warnAt,
+        warningAlarmId,
+        warningAlarmCallback,
+        exact: true,
+        wakeup: true,
+        rescheduleOnReboot: true,
+      );
+      final ok2 = await AndroidAlarmManager.oneShotAt(
+        end,
+        finalAlarmId,
+        finalAlarmCallback,
+        exact: true,
+        wakeup: true,
+        rescheduleOnReboot: true,
+      );
+
+      if (!ok1 || !ok2) {
+        throw Exception('Alarm schedule failed (ok1=$ok1, ok2=$ok2)');
+      }
+
+      setState(() {
+        timerActive = true;
+        endTime = end;
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e'), duration: const Duration(seconds: 6)),
+        );
+      }
+    }
   }
 
   Future<void> _stopTimer() async {
