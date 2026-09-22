@@ -5,7 +5,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
-import 'package:telephony/telephony.dart';
+import 'package:another_telephony/telephony.dart';
 
 const int warningAlarmId = 1001;
 const int finalAlarmId = 1002;
