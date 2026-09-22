@@ -27,6 +27,12 @@ jobs:
           <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\
           <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>' $MANIFEST
       - run: flutter pub get
+      - name: Patch telephony package namespace
+        run: |
+          FILE=$(find /home/runner/.pub-cache/hosted/pub.dev -maxdepth 1 -type d -name "telephony-*")/android/build.gradle
+          if ! grep -q "namespace" "$FILE"; then
+            sed -i '/android {/a\    namespace "com.shounakmulay.telephony"' "$FILE"
+          fi
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4
         with:
