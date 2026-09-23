@@ -13,6 +13,17 @@ const int finalAlarmId = 1002;
 final FlutterLocalNotificationsPlugin notifications =
     FlutterLocalNotificationsPlugin();
 
+Future<void> addLog(String msg) async {
+  final prefs = await SharedPreferences.getInstance();
+  final log = prefs.getStringList('eventLog') ?? [];
+  final ts = DateTime.now();
+  final timeStr =
+      '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}:${ts.second.toString().padLeft(2, '0')}';
+  log.add('$timeStr — $msg');
+  if (log.length > 20) log.removeAt(0);
+  await prefs.setStringList('eventLog', log);
+}
+
 Future<void> initNotifications() async {
   const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
   const initSettings = InitializationSettings(android: androidInit);
@@ -40,13 +51,16 @@ Future<void> showWarningNotification() async {
 @pragma('vm:entry-point')
 Future<void> warningAlarmCallback() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await addLog('Warning alarm FIRED');
   await initNotifications();
   await showWarningNotification();
+  await addLog('Warning notification shown');
 }
 
 @pragma('vm:entry-point')
 Future<void> finalAlarmCallback() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await addLog('Final alarm FIRED');
   final prefs = await SharedPreferences.getInstance();
   final contactsJson = prefs.getStringList('contacts') ?? [];
   final userName = prefs.getString('userName') ?? 'I';
@@ -65,6 +79,7 @@ Future<void> finalAlarmCallback() async {
       locText = 'https://maps.google.com/?q=$lat,$lng';
     }
   }
+  await addLog('Location resolved: $locText');
 
   final message =
       '🚨 SOS Alert from $userName\nI need help right now.\nLocation: $locText';
@@ -75,11 +90,15 @@ Future<void> finalAlarmCallback() async {
     final phone = map['phone'];
     try {
       await telephony.sendSms(to: phone, message: message);
-    } catch (_) {}
+      await addLog('SMS sent to $phone');
+    } catch (e) {
+      await addLog('SMS FAILED to $phone: $e');
+    }
   }
 
   await prefs.setBool('alertSent', true);
   await prefs.remove('timerEndTime');
+  await addLog('Final alarm DONE');
 }
 
 void main() async {
@@ -118,13 +137,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool timerActive = false;
   DateTime? endTime;
   List<Map<String, String>> contacts = [];
+  List<String> eventLog = [];
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _loadState();
-    _requestPermissions();
+    _init();
+  }
+
+  Future<void> _init() async {
+    await _requestAllPermissions();
+    await _loadState();
   }
 
   @override
@@ -135,10 +159,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) _checkIfShouldShowSafeDialog();
+    if (state == AppLifecycleState.resumed) {
+      _checkIfShouldShowSafeDialog();
+      _loadState();
+    }
   }
 
-  Future<void> _requestPermissions() async {
+  Future<void> _requestAllPermissions() async {
     await [
       Permission.sms,
       Permission.location,
@@ -146,15 +173,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       Permission.notification,
       Permission.scheduleExactAlarm,
     ].request();
+
+    if (await Permission.ignoreBatteryOptimizations.isDenied) {
+      await Permission.ignoreBatteryOptimizations.request();
+    }
   }
 
   Future<void> _loadState() async {
     final prefs = await SharedPreferences.getInstance();
     final contactsJson = prefs.getStringList('contacts') ?? [];
     final endTimeStr = prefs.getString('timerEndTime');
+    final log = prefs.getStringList('eventLog') ?? [];
     setState(() {
       contacts =
           contactsJson.map((c) => Map<String, String>.from(jsonDecode(c))).toList();
+      eventLog = log.reversed.toList();
       if (endTimeStr != null) {
         endTime = DateTime.parse(endTimeStr);
         timerActive = endTime!.isAfter(DateTime.now());
@@ -210,6 +243,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final end = now.add(Duration(minutes: selectedMinutes));
       final warnAt = end.subtract(Duration(minutes: warningMinutesBefore));
 
+      await prefs.setStringList('eventLog', []);
+      await addLog(
+          'Timer started: end=${end.hour}:${end.minute}:${end.second}, warn=${warnAt.hour}:${warnAt.minute}:${warnAt.second}');
+
       await prefs.setString('timerEndTime', end.toIso8601String());
       await prefs.setBool('alertSent', false);
 
@@ -236,6 +273,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         wakeup: true,
         rescheduleOnReboot: false,
       );
+      await addLog('Alarms scheduled: warn_ok=$ok1, final_ok=$ok2');
 
       if (!ok1 || !ok2) {
         throw Exception('Alarm schedule failed (ok1=$ok1, ok2=$ok2)');
@@ -245,6 +283,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         timerActive = true;
         endTime = end;
       });
+      _loadState();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -271,6 +310,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         title: const Text('Raahat'),
         actions: [
+          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadState),
           IconButton(
             icon: const Icon(Icons.people),
             onPressed: () async {
@@ -280,17 +320,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-      body: Center(
+      body: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
+              const SizedBox(height: 20),
               Text(timerActive ? '🟠' : '🛡️', style: const TextStyle(fontSize: 50)),
               const SizedBox(height: 10),
               if (timerActive && endTime != null)
                 Text(
-                    'Khatam hoga: ${endTime!.hour}:${endTime!.minute.toString().padLeft(2, '0')}'),
+                    'Khatam hoga: ${endTime!.hour}:${endTime!.minute.toString().padLeft(2, '0')}:${endTime!.second.toString().padLeft(2, '0')}'),
               const SizedBox(height: 20),
               if (!timerActive) ...[
                 const Text('Timer set karo (minutes):'),
@@ -317,8 +357,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
                   child: const Text("I'm safe — Stop timer"),
                 ),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
               Text('${contacts.length} contact(s) saved'),
+              const Divider(height: 40),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Event Log (refresh icon se update karo):',
+                    style: Theme.of(context).textTheme.titleSmall),
+              ),
+              const SizedBox(height: 10),
+              ...eventLog.map((e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(e, style: const TextStyle(fontSize: 12)),
+                    ),
+                  )),
+              if (eventLog.isEmpty) const Text('Abhi koi log nahi hai'),
             ],
           ),
         ),
