@@ -6,7 +6,6 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:another_telephony/telephony.dart';
-import 'package:disable_battery_optimization/disable_battery_optimization.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 const int warningAlarmId = 1001;
@@ -172,7 +171,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  // Sab permissions + battery/background setup ek hi flow mein, app khulte hi
   Future<void> _setupEverything() async {
     await Permission.sms.request();
     await Permission.notification.request();
@@ -182,22 +180,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await Permission.locationAlways.request();
     }
     await Permission.ignoreBatteryOptimizations.request();
-
-    final prefs = await SharedPreferences.getInstance();
-    final done = prefs.getBool('bgSetupDone') ?? false;
-    if (!done) {
-      try {
-        await DisableBatteryOptimization.showDisableAutoStartOptimizationSettings(
-          title: 'Background alerts on rakho',
-          description:
-              'Yahan "Allow" ya toggle ON karo, taaki timer khatam hone par alert screen lock hone par bhi chale.',
-        );
-      } catch (_) {}
-      try {
-        await DisableBatteryOptimization.showDisableBatteryOptimizationSettings();
-      } catch (_) {}
-      await prefs.setBool('bgSetupDone', true);
-    }
   }
 
   Future<void> _callPolice() async {
@@ -397,8 +379,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 22),
-
-                // Status card
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(22),
@@ -487,8 +467,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 16),
-
-                // Quick actions
                 Row(
                   children: [
                     Expanded(
@@ -511,7 +489,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ],
                 ),
                 const SizedBox(height: 12),
-
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -534,7 +511,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 12),
-
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
@@ -547,4 +523,178 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             children: [
                               const Icon(Icons.receipt_long_outlined,
                                   color: Colors.white60),
-                     
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                  child: Text('Activity log',
+                                      style: TextStyle(fontSize: 14))),
+                              Icon(showLog
+                                  ? Icons.expand_less
+                                  : Icons.expand_more),
+                            ],
+                          ),
+                        ),
+                        if (showLog) ...[
+                          const Divider(height: 24),
+                          if (eventLog.isEmpty)
+                            const Text('Abhi koi log nahi hai',
+                                style: TextStyle(color: Colors.white38, fontSize: 12)),
+                          ...eventLog.map((e) => Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 3),
+                                child: Text(e,
+                                    style: const TextStyle(
+                                        fontSize: 11.5, color: Colors.white54)),
+                              )),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _QuickActionCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+  const _QuickActionCard(
+      {required this.icon,
+      required this.label,
+      required this.color,
+      required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            children: [
+              Icon(icon, color: color, size: 28),
+              const SizedBox(height: 8),
+              Text(label,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class ContactsScreen extends StatefulWidget {
+  const ContactsScreen({super.key});
+  @override
+  State<ContactsScreen> createState() => _ContactsScreenState();
+}
+
+class _ContactsScreenState extends State<ContactsScreen> {
+  List<Map<String, String>> contacts = [];
+  final nameController = TextEditingController();
+  final phoneController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('contacts') ?? [];
+    setState(() {
+      contacts = list.map((c) => Map<String, String>.from(jsonDecode(c))).toList();
+    });
+  }
+
+  Future<void> _save() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = contacts.map((c) => jsonEncode(c)).toList();
+    await prefs.setStringList('contacts', list);
+  }
+
+  void _addContact() {
+    final name = nameController.text.trim();
+    final phone = phoneController.text.trim();
+    if (name.isEmpty || phone.isEmpty) return;
+    setState(() => contacts.add({'name': name, 'phone': phone}));
+    _save();
+    nameController.clear();
+    phoneController.clear();
+  }
+
+  void _removeContact(int index) {
+    setState(() => contacts.removeAt(index));
+    _save();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Trusted Contacts')),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    TextField(
+                        controller: nameController,
+                        decoration: const InputDecoration(
+                            labelText: 'Name', border: OutlineInputBorder())),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: phoneController,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(
+                          labelText: 'Phone (91XXXXXXXXXX)',
+                          border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton(
+                        onPressed: _addContact,
+                        child: const Text('+ Add contact'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Expanded(
+              child: ListView.builder(
+                itemCount: contacts.length,
+                itemBuilder: (ctx, i) => Card(
+                  child: ListTile(
+                    leading: CircleAvatar(
+                        child: Text((contacts[i]['name'] ?? '?')[0].toUpperCase())),
+                    title: Text(contacts[i]['name'] ?? ''),
+                    subtitle: Text(contacts[i]['phone'] ?? ''),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _removeContact(i),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
