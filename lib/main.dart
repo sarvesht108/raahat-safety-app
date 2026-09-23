@@ -6,9 +6,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:another_telephony/telephony.dart';
+import 'package:disable_battery_optimization/disable_battery_optimization.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const int warningAlarmId = 1001;
 const int finalAlarmId = 1002;
+const seed = Color(0xFF6C8CFF);
 
 final FlutterLocalNotificationsPlugin notifications =
     FlutterLocalNotificationsPlugin();
@@ -54,7 +57,6 @@ Future<void> warningAlarmCallback() async {
   await addLog('Warning alarm FIRED');
   await initNotifications();
   await showWarningNotification();
-  await addLog('Warning notification shown');
 }
 
 @pragma('vm:entry-point')
@@ -79,7 +81,6 @@ Future<void> finalAlarmCallback() async {
       locText = 'https://maps.google.com/?q=$lat,$lng';
     }
   }
-  await addLog('Location resolved: $locText');
 
   final message =
       '🚨 SOS Alert from $userName\nI need help right now.\nLocation: $locText';
@@ -98,7 +99,6 @@ Future<void> finalAlarmCallback() async {
 
   await prefs.setBool('alertSent', true);
   await prefs.remove('timerEndTime');
-  await addLog('Final alarm DONE');
 }
 
 void main() async {
@@ -115,9 +115,15 @@ class RaahatApp extends StatelessWidget {
     return MaterialApp(
       title: 'Raahat',
       theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF7C9CFF),
+        colorSchemeSeed: seed,
         brightness: Brightness.dark,
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFF0E1116),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF171B23),
+          elevation: 0,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        ),
       ),
       home: const HomeScreen(),
       routes: {'/contacts': (context) => const ContactsScreen()},
@@ -138,6 +144,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime? endTime;
   List<Map<String, String>> contacts = [];
   List<String> eventLog = [];
+  bool showLog = false;
 
   @override
   void initState() {
@@ -147,7 +154,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _init() async {
-    await _requestAllPermissions();
+    await _setupEverything();
     await _loadState();
   }
 
@@ -165,17 +172,57 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _requestAllPermissions() async {
-    await [
-      Permission.sms,
-      Permission.location,
-      Permission.locationAlways,
-      Permission.notification,
-      Permission.scheduleExactAlarm,
-    ].request();
+  // Sab permissions + battery/background setup ek hi flow mein, app khulte hi
+  Future<void> _setupEverything() async {
+    await Permission.sms.request();
+    await Permission.notification.request();
+    await Permission.scheduleExactAlarm.request();
+    final loc = await Permission.location.request();
+    if (loc.isGranted) {
+      await Permission.locationAlways.request();
+    }
+    await Permission.ignoreBatteryOptimizations.request();
 
-    if (await Permission.ignoreBatteryOptimizations.isDenied) {
-      await Permission.ignoreBatteryOptimizations.request();
+    final prefs = await SharedPreferences.getInstance();
+    final done = prefs.getBool('bgSetupDone') ?? false;
+    if (!done) {
+      try {
+        await DisableBatteryOptimization.showDisableAutoStartOptimizationSettings(
+          title: 'Background alerts on rakho',
+          description:
+              'Yahan "Allow" ya toggle ON karo, taaki timer khatam hone par alert screen lock hone par bhi chale.',
+        );
+      } catch (_) {}
+      try {
+        await DisableBatteryOptimization.showDisableBatteryOptimizationSettings();
+      } catch (_) {}
+      await prefs.setBool('bgSetupDone', true);
+    }
+  }
+
+  Future<void> _callPolice() async {
+    final uri = Uri.parse('tel:112');
+    try {
+      await launchUrl(uri);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Dialer nahi khul saka: $e')));
+      }
+    }
+  }
+
+  Future<void> _shareMyLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.high);
+      final url = 'https://maps.google.com/?q=${pos.latitude},${pos.longitude}';
+      await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Location error: $e')));
+      }
     }
   }
 
@@ -215,11 +262,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Text('⚠️ Are you safe?'),
         content: Text(
             'Timer khatam hone wala hai (${end.hour}:${end.minute.toString().padLeft(2, '0')}). Safe ho to "I\'m safe" dabao, warna alert chala jayega.'),
         actions: [
-          TextButton(
+          FilledButton(
             onPressed: () async {
               Navigator.pop(ctx);
               await _stopTimer();
@@ -244,9 +292,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       final warnAt = end.subtract(Duration(minutes: warningMinutesBefore));
 
       await prefs.setStringList('eventLog', []);
-      await addLog(
-          'Timer started: end=${end.hour}:${end.minute}:${end.second}, warn=${warnAt.hour}:${warnAt.minute}:${warnAt.second}');
-
+      await addLog('Timer started');
       await prefs.setString('timerEndTime', end.toIso8601String());
       await prefs.setBool('alertSent', false);
 
@@ -276,7 +322,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       await addLog('Alarms scheduled: warn_ok=$ok1, final_ok=$ok2');
 
       if (!ok1 || !ok2) {
-        throw Exception('Alarm schedule failed (ok1=$ok1, ok2=$ok2)');
+        throw Exception('Alarm schedule failed');
       }
 
       setState(() {
@@ -307,163 +353,198 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Raahat'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: _loadState),
-          IconButton(
-            icon: const Icon(Icons.people),
-            onPressed: () async {
-              await Navigator.pushNamed(context, '/contacts');
-              _loadState();
-            },
-          ),
-        ],
-      ),
-      body: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            children: [
-              const SizedBox(height: 20),
-              Text(timerActive ? '🟠' : '🛡️', style: const TextStyle(fontSize: 50)),
-              const SizedBox(height: 10),
-              if (timerActive && endTime != null)
-                Text(
-                    'Khatam hoga: ${endTime!.hour}:${endTime!.minute.toString().padLeft(2, '0')}:${endTime!.second.toString().padLeft(2, '0')}'),
-              const SizedBox(height: 20),
-              if (!timerActive) ...[
-                const Text('Timer set karo (minutes):'),
-                DropdownButton<int>(
-                  value: selectedMinutes,
-                  items: [1, 5, 10, 15, 20, 30, 45, 60]
-                      .map((m) => DropdownMenuItem(value: m, child: Text('$m min')))
-                      .toList(),
-                  onChanged: (v) => setState(() => selectedMinutes = v!),
-                ),
-                const SizedBox(height: 20),
-                ElevatedButton(
-                  onPressed: _startTimer,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.redAccent,
-                    padding: const EdgeInsets.all(30),
-                    shape: const CircleBorder(),
-                  ),
-                  child: const Text('Start\nTimer', textAlign: TextAlign.center),
-                ),
-              ] else
-                ElevatedButton(
-                  onPressed: _stopTimer,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                  child: const Text("I'm safe — Stop timer"),
-                ),
-              const SizedBox(height: 20),
-              Text('${contacts.length} contact(s) saved'),
-              const Divider(height: 40),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Event Log (refresh icon se update karo):',
-                    style: Theme.of(context).textTheme.titleSmall),
-              ),
-              const SizedBox(height: 10),
-              ...eventLog.map((e) => Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(e, style: const TextStyle(fontSize: 12)),
+      body: SafeArea(
+        child: RefreshIndicator(
+          onRefresh: _loadState,
+          child: SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(18, 20, 18, 30),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: seed.withOpacity(0.18),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      alignment: Alignment.center,
+                      child: const Text('🛡️', style: TextStyle(fontSize: 24)),
                     ),
-                  )),
-              if (eventLog.isEmpty) const Text('Abhi koi log nahi hai'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+                    const SizedBox(width: 12),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Raahat',
+                              style: TextStyle(
+                                  fontSize: 22, fontWeight: FontWeight.w700)),
+                          Text('Your safety companion',
+                              style: TextStyle(fontSize: 12, color: Colors.white54)),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () async {
+                        await Navigator.pushNamed(context, '/contacts');
+                        _loadState();
+                      },
+                      icon: const Icon(Icons.people_alt_outlined),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 22),
 
-class ContactsScreen extends StatefulWidget {
-  const ContactsScreen({super.key});
-  @override
-  State<ContactsScreen> createState() => _ContactsScreenState();
-}
-
-class _ContactsScreenState extends State<ContactsScreen> {
-  List<Map<String, String>> contacts = [];
-  final nameController = TextEditingController();
-  final phoneController = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = prefs.getStringList('contacts') ?? [];
-    setState(() {
-      contacts = list.map((c) => Map<String, String>.from(jsonDecode(c))).toList();
-    });
-  }
-
-  Future<void> _save() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = contacts.map((c) => jsonEncode(c)).toList();
-    await prefs.setStringList('contacts', list);
-  }
-
-  void _addContact() {
-    final name = nameController.text.trim();
-    final phone = phoneController.text.trim();
-    if (name.isEmpty || phone.isEmpty) return;
-    setState(() => contacts.add({'name': name, 'phone': phone}));
-    _save();
-    nameController.clear();
-    phoneController.clear();
-  }
-
-  void _removeContact(int index) {
-    setState(() => contacts.removeAt(index));
-    _save();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Trusted Contacts')),
-      body: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          children: [
-            TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Name')),
-            TextField(
-              controller: phoneController,
-              keyboardType: TextInputType.phone,
-              decoration:
-                  const InputDecoration(labelText: 'Phone (with country code)'),
-            ),
-            const SizedBox(height: 10),
-            ElevatedButton(onPressed: _addContact, child: const Text('+ Add contact')),
-            const Divider(height: 30),
-            Expanded(
-              child: ListView.builder(
-                itemCount: contacts.length,
-                itemBuilder: (ctx, i) => ListTile(
-                  title: Text(contacts[i]['name'] ?? ''),
-                  subtitle: Text(contacts[i]['phone'] ?? ''),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.delete),
-                    onPressed: () => _removeContact(i),
+                // Status card
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(22),
+                    child: Column(
+                      children: [
+                        Container(
+                          width: 96,
+                          height: 96,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: (timerActive ? Colors.orange : seed)
+                                .withOpacity(0.15),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(timerActive ? '🟠' : '🛡️',
+                              style: const TextStyle(fontSize: 40)),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          timerActive ? 'Monitoring active' : 'All safe',
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        if (timerActive && endTime != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              'Khatam hoga: ${endTime!.hour.toString().padLeft(2, '0')}:${endTime!.minute.toString().padLeft(2, '0')}:${endTime!.second.toString().padLeft(2, '0')}',
+                              style: const TextStyle(color: Colors.white60),
+                            ),
+                          ),
+                        const SizedBox(height: 20),
+                        if (!timerActive) ...[
+                          Container(
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.06),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: DropdownButton<int>(
+                              value: selectedMinutes,
+                              underline: const SizedBox(),
+                              dropdownColor: const Color(0xFF1E2430),
+                              items: [1, 5, 10, 15, 20, 30, 45, 60]
+                                  .map((m) => DropdownMenuItem(
+                                      value: m, child: Text('$m min')))
+                                  .toList(),
+                              onChanged: (v) => setState(() => selectedMinutes = v!),
+                            ),
+                          ),
+                          const SizedBox(height: 22),
+                          SizedBox(
+                            width: 150,
+                            height: 150,
+                            child: ElevatedButton(
+                              onPressed: _startTimer,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.redAccent,
+                                foregroundColor: Colors.white,
+                                shape: const CircleBorder(),
+                                elevation: 6,
+                              ),
+                              child: const Text('Start\nTimer',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                      fontSize: 18, fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        ] else
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton(
+                              onPressed: _stopTimer,
+                              style: FilledButton.styleFrom(
+                                backgroundColor: Colors.green,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                              ),
+                              child: const Text("I'm safe — Stop timer"),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+                const SizedBox(height: 16),
+
+                // Quick actions
+                Row(
+                  children: [
+                    Expanded(
+                      child: _QuickActionCard(
+                        icon: Icons.local_police_rounded,
+                        label: 'Call 112',
+                        color: Colors.redAccent,
+                        onTap: _callPolice,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickActionCard(
+                        icon: Icons.location_on_rounded,
+                        label: 'My Location',
+                        color: seed,
+                        onTap: _shareMyLocation,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.contacts_outlined, color: Colors.white60),
+                        const SizedBox(width: 10),
+                        Expanded(
+                            child: Text('${contacts.length} contact(s) saved',
+                                style: const TextStyle(fontSize: 14))),
+                        TextButton(
+                          onPressed: () async {
+                            await Navigator.pushNamed(context, '/contacts');
+                            _loadState();
+                          },
+                          child: const Text('Manage'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        InkWell(
+                          onTap: () => setState(() => showLog = !showLog),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.receipt_long_outlined,
+                                  color: Colors.white60),
+                     
