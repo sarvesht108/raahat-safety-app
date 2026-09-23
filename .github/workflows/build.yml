@@ -27,7 +27,8 @@ jobs:
           <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\
           <uses-permission android:name="android.permission.WAKE_LOCK"/>\
           <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>\
-          <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>' $MANIFEST
+          <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>\
+          <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>' $MANIFEST
       - name: Bump compileSdk
         run: |
           sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 36/' android/app/build.gradle.kts
