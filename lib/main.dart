@@ -226,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         warningAlarmCallback,
         exact: true,
         wakeup: true,
-        rescheduleOnReboot: true,
+        rescheduleOnReboot: false,
       );
       final ok2 = await AndroidAlarmManager.oneShotAt(
         end,
@@ -234,7 +234,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         finalAlarmCallback,
         exact: true,
         wakeup: true,
-        rescheduleOnReboot: true,
+        rescheduleOnReboot: false,
       );
 
       if (!ok1 || !ok2) {
@@ -296,7 +296,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 const Text('Timer set karo (minutes):'),
                 DropdownButton<int>(
                   value: selectedMinutes,
-                  items: [5, 10, 15, 20, 30, 45, 60]
+                  items: [1, 5, 10, 15, 20, 30, 45, 60]
                       .map((m) => DropdownMenuItem(value: m, child: Text('$m min')))
                       .toList(),
                   onChanged: (v) => setState(() => selectedMinutes = v!),
